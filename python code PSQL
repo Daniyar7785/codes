@@ -1,0 +1,26 @@
+import psycopg2
+import traceback
+from sshtunnel import SSHTunnelForwarder
+try:
+   with SSHTunnelForwarder(
+         ('54.200.37.1', 22),
+         #ssh_private_key="</path/to/private/ssh/key>",
+         ### in my case, I used a password instead of a private key
+         ssh_username="impl-admin-rw",
+         ssh_private_key= r"C:\Users\f2aibzf\OneDrive - Fiserv Corp\Documents\prod6-db-proxy-impl-admin-key.pem",
+         remote_bind_address=('credo-prod6.cc5z9bpskbmx.us-west-2.rds.amazonaws.com', 5432)) as server:
+         
+         server.start()
+         print ("server connected")
+         params = {
+             'database': 'postgres',
+             'user': 'cloud_infra_db_admin',
+             'password': '89yYux69YUktt',
+             'host': 'localhost',
+             'port': server.local_bind_port
+             }
+         conn = psycopg2.connect(**params)
+         curs = conn.cursor()
+         print ("database connected")
+except:
+    print ("Connection Failed")
