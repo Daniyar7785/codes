@@ -24,3 +24,60 @@ try:
          print ("database connected")
 except:
     print ("Connection Failed")
+
+
+
+
+import psycopg2
+from sshtunnel import SSHTunnelForwarder
+
+
+# Create an SSH tunnel
+tunnel = SSHTunnelForwarder(
+    ('IP address', 22),
+    ssh_username='ssh username',
+    ssh_private_key='./id_rsa',
+    remote_bind_address=('localhost', 5432),
+    local_bind_address=('localhost',6543),
+)
+
+print("Creating SSH Tunnel..")
+
+# Start the tunnel
+tunnel.start()
+
+print("Creating Database Connection..")
+
+# Create a database connection
+conn = psycopg2.connect(
+    database='postgres',
+    user='produsername',
+    password='prodpassowrd',
+    host=tunnel.local_bind_host,
+    port=tunnel.local_bind_port,
+)
+
+# Get a database cursor
+cur = conn.cursor()
+
+print("Getting all available databases..")
+
+# Get all databases
+cur.execute("""
+SELECT datname FROM pg_database WHERE datname <> ALL ('{template0,template1,postgres}')
+""")
+
+# Store response in a variable
+databases = cur.fetchall()
+
+# Close current connections
+conn.close()
+
+print("%s database(s) available" % (len(databases)))
+
+print("Closing database connection..")
+print("Closing ssh tunnel..")
+# Stop the tunnel
+tunnel.stop()
+
+print("Processing finished!")
