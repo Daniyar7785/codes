@@ -40,6 +40,198 @@ tunnel = SSHTunnelForwarder(
 
 
 
+
+#######################################
+#  Postgres Auto Permission Granting  #
+#######################################
+#                                     #
+#           Program Flow              #
+#_____________________________________#
+# -Connect to postgres via ssh tunnel #
+# -Get all available databases        #
+# -Connect to each database           #
+# -Grant connect to all database      #
+#    to readonly and readwrite        #
+# -Get all available schema           #
+# -Grant Usage and Table permissions  #
+#_____________________________________#
+#         Permissions Granted         #
+# Readonly User                       #
+#   - Connect on all database         #
+#   - Usage on all schemas available  #
+#   - Select on all tables available  #
+#                                     #
+# ReadWrite User                      #
+#   - Connect on all database         #
+#   - Usage on all schemas available  #
+#   - Select, Insert, Update and      #
+#     Delete on all tables available  #
+#######################################
+
+import psycopg2
+from sshtunnel import SSHTunnelForwarder
+import time
+
+
+# Progress Tracker Variables
+databasecount = 0
+schemascount = 0
+start = time.time()
+for i in range(0,100000):
+    x = 0
+
+# Create an SSH tunnel
+tunnel = SSHTunnelForwarder(
+    ('10.0.1.107', 22),
+    ssh_username='john',
+    ssh_private_key='../id_rsa',
+    remote_bind_address=('localhost', 5432),
+    local_bind_address=('localhost',6543),
+)
+
+print("Creating SSH Tunnel..")
+
+# Start the tunnel
+tunnel.start()
+
+print("Creating Database Connection..")
+
+# Create a database connection
+conn = psycopg2.connect(
+    database='postgres',
+    user='prod_admin_user',
+    password='pass',
+    host=tunnel.local_bind_host,
+    port=tunnel.local_bind_port,
+    sslmode='require'
+)
+
+# Get a database cursor
+cur = conn.cursor()
+
+print("Getting all available databases..")
+
+# Get all databases
+cur.execute("""
+SELECT datname FROM pg_database WHERE datname <> ALL ('{template0,template1,postgres}')
+""")
+
+# Store response in a variable
+databases = cur.fetchall()
+
+# Close current connections
+conn.close()
+
+print("%s database(s) available, Processing started.." % (len(databases)))
+print("Granting Permissions needed..")
+
+for dbname in databases:
+
+    if dbname[0] != 'rdsadmin':
+
+        databasecount += 1
+        dbdata = {
+            'name': dbname[0],
+            'readonly_user': 'readonly_user_prod',
+            'readwrite_user': 'readwrite_user_prod'
+        }
+        conn2 = psycopg2.connect(
+            database=dbname[0],
+            user='prod_admin_user',
+            password='pass',
+            host=tunnel.local_bind_host,
+            port=tunnel.local_bind_port,
+            sslmode='require'
+        )
+        
+        # Get a database cursor
+        cur2 = conn2.cursor()
+
+        # Execute SQL
+        
+        cur2.execute("""
+        GRANT CONNECT ON DATABASE %(name)s TO %(readonly_user)s
+        """ % dbdata)
+
+        cur2.execute("""
+        GRANT CONNECT ON DATABASE %(name)s TO %(readwrite_user)s
+        """ % dbdata)
+
+        cur2.execute("""
+        commit;
+        """)
+
+        cur2.execute("""
+        SELECT nspname FROM pg_namespace where nspname != 'pg_toast' 
+        and nspname != 'pg_temp_1' and nspname != 'pg_toast_temp_1'
+        and nspname != 'pg_statistic' and nspname != 'pg_catalog'
+        and nspname != 'information_schema'
+        """)
+
+        schemas = cur2.fetchall()
+
+        for schemaname in schemas:
+
+            schemascount += 1
+            currentschema = schemaname[0]
+            schemadata = {
+                'name': currentschema,
+                'readonly_user': 'readonly_user_prod',
+                'readwrite_user': 'readwrite_user_prod'
+            }
+
+            cur2.execute("""
+            GRANT USAGE ON SCHEMA %(name)s TO %(readonly_user)s
+            """ % schemadata)
+
+            cur2.execute("""
+            GRANT SELECT ON ALL TABLES IN SCHEMA %(name)s TO %(readonly_user)s
+            """ % schemadata)
+
+            cur2.execute("""
+            GRANT SELECT ON ALL SEQUENCES IN SCHEMA %(name)s TO %(readonly_user)s
+            """ % schemadata)
+
+            cur2.execute("""
+            GRANT USAGE ON SCHEMA %(name)s TO %(readwrite_user)s
+            """ % schemadata)
+
+            cur2.execute("""
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %(name)s TO %(readwrite_user)s
+            """ % schemadata)
+            
+            cur2.execute("""
+            GRANT SELECT ON ALL SEQUENCES IN SCHEMA %(name)s TO %(readwrite_user)s
+            """ % schemadata)
+
+            cur2.execute("""
+            commit;
+            """)
+
+            
+        conn2.close()
+
+
+print("%s database(s) and %s schema(s) processed." % (databasecount, schemascount))
+print("Closing database connection..")
+print("Closing ssh tunnel..")
+# Stop the tunnel
+tunnel.stop()
+
+end = time.time()
+elapsed_time = end-start
+
+print("Processing finished!")
+print("Elapsed time: %.2fs" % (elapsed_time))
+
+
+
+
+
+
+
+
+
 #######################################
 #  Postgres Auto Permission Granting  #
 #######################################
