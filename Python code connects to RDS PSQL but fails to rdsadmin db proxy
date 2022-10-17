@@ -41,7 +41,7 @@ for i in range(0,100000):
 tunnel = SSHTunnelForwarder(
     ('10.0.1.107', 22),
     ssh_username='john',
-    ssh_private_key='../id_rsa',
+    ssh_private_key_password='passs',
     remote_bind_address=('localhost', 5432),
     local_bind_address=('localhost',6543),
 )
@@ -60,7 +60,6 @@ conn = psycopg2.connect(
     password='pass',
     host=tunnel.local_bind_host,
     port=tunnel.local_bind_port,
-    sslmode='require'
 )
 
 # Get a database cursor
@@ -84,89 +83,87 @@ print("Granting Permissions needed..")
 
 for dbname in databases:
 
-    if dbname[0] != 'rdsadmin':
+    databasecount += 1
+    dbdata = {
+        'name': dbname[0],
+        'readonly_user': 'readonly_user_prod',
+        'readwrite_user': 'readwrite_user_prod'
+    }
+    conn2 = psycopg2.connect(
+        database=dbname[0],
+        user='prod_admin_user',
+        password='pass',
+        host=tunnel.local_bind_host,
+        port=tunnel.local_bind_port,
+        sslmode='require'
+    )
+    
+    # Get a database cursor
+    cur2 = conn2.cursor()
 
-        databasecount += 1
-        dbdata = {
-            'name': dbname[0],
+    # Execute SQL
+    
+    cur2.execute("""
+    GRANT CONNECT ON DATABASE %(name)s TO %(readonly_user)s
+    """ % dbdata)
+
+    cur2.execute("""
+    GRANT CONNECT ON DATABASE %(name)s TO %(readwrite_user)s
+    """ % dbdata)
+
+    cur2.execute("""
+    commit;
+    """)
+
+    cur2.execute("""
+    SELECT nspname FROM pg_namespace where nspname != 'pg_toast' 
+      and nspname != 'pg_temp_1' and nspname != 'pg_toast_temp_1'
+      and nspname != 'pg_statistic' and nspname != 'pg_catalog'
+      and nspname != 'information_schema'
+    """)
+
+    schemas = cur2.fetchall()
+
+    for schemaname in schemas:
+
+        schemascount += 1
+        currentschema = schemaname[0]
+        schemadata = {
+            'name': currentschema,
             'readonly_user': 'readonly_user_prod',
             'readwrite_user': 'readwrite_user_prod'
         }
-        conn2 = psycopg2.connect(
-            database=dbname[0],
-            user='prod_admin_user',
-            password='pass',
-            host=tunnel.local_bind_host,
-            port=tunnel.local_bind_port,
-            sslmode='require'
-        )
-        
-        # Get a database cursor
-        cur2 = conn2.cursor()
-
-        # Execute SQL
-        
-        cur2.execute("""
-        GRANT CONNECT ON DATABASE %(name)s TO %(readonly_user)s
-        """ % dbdata)
 
         cur2.execute("""
-        GRANT CONNECT ON DATABASE %(name)s TO %(readwrite_user)s
-        """ % dbdata)
+        GRANT USAGE ON SCHEMA %(name)s TO %(readonly_user)s
+        """ % schemadata)
+
+        cur2.execute("""
+        GRANT SELECT ON ALL TABLES IN SCHEMA %(name)s TO %(readonly_user)s
+        """ % schemadata)
+
+        cur2.execute("""
+        GRANT SELECT ON ALL SEQUENCES IN SCHEMA %(name)s TO %(readonly_user)s
+        """ % schemadata)
+
+        cur2.execute("""
+        GRANT USAGE ON SCHEMA %(name)s TO %(readwrite_user)s
+        """ % schemadata)
+
+        cur2.execute("""
+        GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %(name)s TO %(readwrite_user)s
+        """ % schemadata)
+        
+        cur2.execute("""
+        GRANT SELECT ON ALL SEQUENCES IN SCHEMA %(name)s TO %(readwrite_user)s
+        """ % schemadata)
 
         cur2.execute("""
         commit;
         """)
 
-        cur2.execute("""
-        SELECT nspname FROM pg_namespace where nspname != 'pg_toast' 
-        and nspname != 'pg_temp_1' and nspname != 'pg_toast_temp_1'
-        and nspname != 'pg_statistic' and nspname != 'pg_catalog'
-        and nspname != 'information_schema'
-        """)
-
-        schemas = cur2.fetchall()
-
-        for schemaname in schemas:
-
-            schemascount += 1
-            currentschema = schemaname[0]
-            schemadata = {
-                'name': currentschema,
-                'readonly_user': 'readonly_user_prod',
-                'readwrite_user': 'readwrite_user_prod'
-            }
-
-            cur2.execute("""
-            GRANT USAGE ON SCHEMA %(name)s TO %(readonly_user)s
-            """ % schemadata)
-
-            cur2.execute("""
-            GRANT SELECT ON ALL TABLES IN SCHEMA %(name)s TO %(readonly_user)s
-            """ % schemadata)
-
-            cur2.execute("""
-            GRANT SELECT ON ALL SEQUENCES IN SCHEMA %(name)s TO %(readonly_user)s
-            """ % schemadata)
-
-            cur2.execute("""
-            GRANT USAGE ON SCHEMA %(name)s TO %(readwrite_user)s
-            """ % schemadata)
-
-            cur2.execute("""
-            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %(name)s TO %(readwrite_user)s
-            """ % schemadata)
-            
-            cur2.execute("""
-            GRANT SELECT ON ALL SEQUENCES IN SCHEMA %(name)s TO %(readwrite_user)s
-            """ % schemadata)
-
-            cur2.execute("""
-            commit;
-            """)
-
-            
-        conn2.close()
+        
+    conn2.close()
 
 
 print("%s database(s) and %s schema(s) processed." % (databasecount, schemascount))
